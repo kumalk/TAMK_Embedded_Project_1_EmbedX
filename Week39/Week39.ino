@@ -163,14 +163,14 @@ void joyPressed(){
 
 void runMotors(int xPer,int yPer) {
 
-  if(xPer>0 && yPer==0){ //turn left, Right motor(our left motor) only
+  if(xPer > 0 && abs(yPer) < 40){ //turn left, Right motor(our left motor) only
     digitalWrite(Motor_L_dir_pin, Motor_forward);
     digitalWrite(Motor_R_dir_pin, Motor_return);  //setting Left motor direction
     analogWrite(Motor_L_pwm_pin, motorSpeed(xPer));
     analogWrite(Motor_R_pwm_pin, motorSpeed(xPer));
     delay(10); 
 
-  }else if(xPer<0 && yPer==0){ //turn right, left motor(our rigth motor) only
+  }else if(xPer < 0 && abs(yPer) < 40){ //turn right, left motor(our rigth motor) only
     digitalWrite(Motor_L_dir_pin, Motor_return);
     digitalWrite(Motor_R_dir_pin, Motor_forward);  //setting Left motor direction
     analogWrite(Motor_L_pwm_pin, motorSpeed(xPer));
