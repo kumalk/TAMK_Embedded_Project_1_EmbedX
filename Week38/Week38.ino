@@ -15,7 +15,7 @@
 
 
 int pressCount = 0;
-volatile unsigned long lastInterruptTime = 0;
+volatile unsigned long lastInterruptTime = 0; 
 
 struct Button {
   bool pressed = false;
