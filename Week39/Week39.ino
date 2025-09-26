@@ -17,7 +17,7 @@
 int pressCount = 0;// this is to display press count on the screen
 volatile unsigned long lastInterruptTime = 0; // this is to elemenate boutton press debounce
 
-struct Button {. // we created this button stucture just like an class to handle button press later
+struct Button { // we created this button stucture just like an class to handle button press later
   bool pressed = false;
 };
 
@@ -25,6 +25,7 @@ struct Joystick { // Joystick object(structure) to handle joystic direction and 
   int x = 0;
   int y = 0;
   Button button; // creating a new button object from the Button class.
+};
 
 int maxX[] = {0,522,1023}; // These are the left maximum , middle and right maximum analog values of the joystic direction in X axis
 int maxY[] = {0,494,1023}; // These are the left maximum , middle and right maximum analog values of the joystic direction in y axis
@@ -46,12 +47,13 @@ void setup() {
   pinMode(Motor_R_pwm_pin, OUTPUT); // Right motor power(speed) pin as output
 
   Serial.begin(9600);// starting serial monitor
+}
 
 void loop() {
   // Check button press flag
   if (buttonPressedFlag) { //
     buttonPressedFlag = false;  // reset flag to identify if button is pressed, becuase there was an issue in updating display inside ISR function, so we update lcd in default loop by identifying the flag at the very begininig.
-    runMotors();
+    
   }
 
   Joystick joystick; // creating joyStick object 
@@ -60,6 +62,7 @@ void loop() {
   joystick.y = analogRead(ANALOG_Y_PIN); // reading analog pin to get Y value of the joy stick
   int* joyPercents = joystickPercentages(joystick.x, joystick.y); // we create joystick direction values as percentages via joystickPercentages() , this Array is to call it and store the returning values
 
+  
  
 
   // Update LCD
@@ -77,6 +80,9 @@ void loop() {
   lcd.setCursor(15, 1);
   lcd.print(joyPercents[1]);
   lcd.print("%");
+
+  runMotors(joyPercents[0], joyPercents[1]);
+
 
   // Debug output in Serial monitor
   Serial.print("X: ");
@@ -133,6 +139,10 @@ int* joystickPercentages(int x, int y){
   return joystickPercentageValues;
 }
 
+int motorSpeed(int percentage){
+  return abs(255*percentage/100);
+}
+
 // ISR to fire when joystick button presses
 void joyPressed(){
   unsigned long interruptTime = millis();
@@ -151,8 +161,44 @@ void joyPressed(){
 
 
 
+void runMotors(int xPer,int yPer) {
 
-void runMotors() {
+  if(xPer>0 && yPer==0){ //turn left, Right motor(our left motor) only
+    digitalWrite(Motor_L_dir_pin, Motor_forward);
+    digitalWrite(Motor_R_dir_pin, Motor_return);  //setting Left motor direction
+    analogWrite(Motor_L_pwm_pin, motorSpeed(xPer));
+    analogWrite(Motor_R_pwm_pin, motorSpeed(xPer));
+    delay(10); 
+
+  }else if(xPer<0 && yPer==0){ //turn right, left motor(our rigth motor) only
+    digitalWrite(Motor_L_dir_pin, Motor_return);
+    digitalWrite(Motor_R_dir_pin, Motor_forward);  //setting Left motor direction
+    analogWrite(Motor_L_pwm_pin, motorSpeed(xPer));
+    analogWrite(Motor_R_pwm_pin, motorSpeed(xPer));
+    delay(10);
+
+  }else if(xPer==0 && yPer>0){ //go farward, both motors farward
+    digitalWrite(Motor_L_dir_pin, Motor_forward);
+    digitalWrite(Motor_R_dir_pin, Motor_forward);  //setting Left motor direction
+    analogWrite(Motor_L_pwm_pin, motorSpeed(yPer));
+    analogWrite(Motor_R_pwm_pin, motorSpeed(yPer));
+    delay(10);
+  }else if(xPer==0 && yPer<0){ //go backward, both motors backward
+    digitalWrite(Motor_L_dir_pin, Motor_return);
+    digitalWrite(Motor_R_dir_pin, Motor_return);  //setting Left motor direction
+    analogWrite(Motor_L_pwm_pin, motorSpeed(yPer));
+    analogWrite(Motor_R_pwm_pin, motorSpeed(yPer));
+    delay(10);
+  }else{//stop motor both val 0
+    analogWrite(Motor_R_pwm_pin, 0);
+    analogWrite(Motor_L_pwm_pin, 0);
+  }
+
+  
+}
+
+
+/*void runMotors() {
   
 
   // Motor backward
@@ -174,4 +220,4 @@ void runMotors() {
   analogWrite(Motor_L_pwm_pin, 0);
 
   
-}
+}*/
