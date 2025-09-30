@@ -16,6 +16,14 @@
 
 int pressCount = 0;// this is to display press count on the screen
 volatile unsigned long lastInterruptTime = 0; // this is to elemenate boutton press debounce
+volatile long encoderCount_left = 0;
+volatile long encoderCount_right = 0;
+float distperpuls = 1.4;
+int travelDist = 100;// travelling distance in mm
+int targetPulsCount = (int)(travelDist * distperpuls);  
+
+bool motorRunning = false;
+
 
 struct Button { // we created this button stucture just like an class to handle button press later
   bool pressed = false;
@@ -46,58 +54,44 @@ void setup() {
   pinMode(Motor_L_pwm_pin, OUTPUT); // Left motor power(speed) pin as output
   pinMode(Motor_R_pwm_pin, OUTPUT); // Right motor power(speed) pin as output
 
+  pinMode(2, INPUT_PULLUP);//encoder pin initialize
+  attachInterrupt(digitalPinToInterrupt(2), countEncoder_left, RISING);
+  attachInterrupt(digitalPinToInterrupt(3), countEncoder_right, RISING);
   Serial.begin(9600);// starting serial monitor
 }
 
 void loop() {
-  // Check button press flag
-  if (buttonPressedFlag) { //
-    buttonPressedFlag = false;  // reset flag to identify if button is pressed, becuase there was an issue in updating display inside ISR function, so we update lcd in default loop by identifying the flag at the very begininig.
-    
+  if (buttonPressedFlag) {
+    buttonPressedFlag = false;
+
+    encoderCount_left = 0;  // reset before starting
+    encoderCount_right = 0;
+
+    digitalWrite(Motor_L_dir_pin, HIGH);  // forward
+    digitalWrite(Motor_R_dir_pin, HIGH);
+    analogWrite(Motor_L_pwm_pin, 100);
+    analogWrite(Motor_R_pwm_pin, 100);
+    motorRunning = true;
   }
 
-  Joystick joystick; // creating joyStick object 
-  
-  joystick.x = analogRead(ANALOG_X_PIN); // reading analog pin to get X value of the joy stick
-  joystick.y = analogRead(ANALOG_Y_PIN); // reading analog pin to get Y value of the joy stick
-  int* joyPercents = joystickPercentages(joystick.x, joystick.y); // we create joystick direction values as percentages via joystickPercentages() , this Array is to call it and store the returning values
-
-  
- 
+  // Stop motor when target reached
+  if (motorRunning && encoderCount_left >= targetPulsCount) {
+    analogWrite(Motor_L_pwm_pin, 0);
+    analogWrite(Motor_R_pwm_pin, 0);
+    motorRunning = false;
+  }
 
   // Update LCD
   lcd.clear();
   lcd.setCursor(0, 0);
-  lcd.print("x:");
-  lcd.print(joystick.x);
-  lcd.setCursor(15, 0);
-  lcd.print(joyPercents[0]);
-  lcd.print("%");
-  
+  lcd.print("ENAC Left:");
+  lcd.print(encoderCount_left);
+
   lcd.setCursor(0, 1);
-  lcd.print("y:");
-  lcd.print(joystick.y);
-  lcd.setCursor(15, 1);
-  lcd.print(joyPercents[1]);
-  lcd.print("%");
+  lcd.print("ENAC Right:");
+  lcd.print(encoderCount_right);
 
-  runMotors(joyPercents[0], joyPercents[1]);
-
-
-  // Debug output in Serial monitor
-  Serial.print("X: ");
-  Serial.println(joystick.x);
-
-  Serial.print("Y: ");
-  Serial.println(joystick.y);
-
-  if (joystick.button.pressed) {
-    Serial.println("Button pressed");
-  } else {
-    Serial.println("Button not pressed");
-  }
-
-  delay(200);
+  delay(50); // small delay is okay
 }
 
 
@@ -161,42 +155,41 @@ void joyPressed(){
 
 
 
-void runMotors(int xPer,int yPer) {
+void runMotors() {
 
-  if(xPer > 0 && abs(yPer) < 40){ //turn left, Right motor(our left motor) only
-    digitalWrite(Motor_L_dir_pin, Motor_forward);
-    digitalWrite(Motor_R_dir_pin, Motor_return);  //setting Left motor direction
-    analogWrite(Motor_L_pwm_pin, motorSpeed(xPer));
-    //analogWrite(Motor_R_pwm_pin, motorSpeed(xPer));
-    delay(10); 
+  
 
-  }else if(xPer < 0 && abs(yPer) < 40){ //turn right, left motor(our rigth motor) only
-    digitalWrite(Motor_L_dir_pin, Motor_return);
-    digitalWrite(Motor_R_dir_pin, Motor_forward);  //setting Left motor direction
-    //analogWrite(Motor_L_pwm_pin, motorSpeed(xPer));
-    analogWrite(Motor_R_pwm_pin, motorSpeed(xPer));
-    delay(10);
+  /*// Motor backward
+  digitalWrite(Motor_R_dir_pin, Motor_return);  
+  digitalWrite(Motor_L_dir_pin, Motor_return);  
+  analogWrite(Motor_R_pwm_pin, 255);   
+  analogWrite(Motor_L_pwm_pin, 255);   
+  delay(2000);*/
 
-  }else if(xPer==0 && yPer>0){ //go farward, both motors farward
-    digitalWrite(Motor_L_dir_pin, Motor_forward);
-    digitalWrite(Motor_R_dir_pin, Motor_forward);  //setting Left motor direction
-    analogWrite(Motor_L_pwm_pin, motorSpeed(yPer));
-    analogWrite(Motor_R_pwm_pin, motorSpeed(yPer));
-    delay(10);
-  }else if(xPer==0 && yPer<0){ //go backward, both motors backward
-    digitalWrite(Motor_L_dir_pin, Motor_return);
-    digitalWrite(Motor_R_dir_pin, Motor_return);  //setting Left motor direction
-    analogWrite(Motor_L_pwm_pin, motorSpeed(yPer));
-    analogWrite(Motor_R_pwm_pin, motorSpeed(yPer));
-    delay(10);
-  }else{//stop motor both val 0
-    analogWrite(Motor_R_pwm_pin, 0);
-    analogWrite(Motor_L_pwm_pin, 0);
-  }
+  // Motor forward
+  digitalWrite(Motor_R_dir_pin, Motor_forward);  
+  digitalWrite(Motor_L_dir_pin, Motor_forward);  
+  analogWrite(Motor_R_pwm_pin, 100);
+  analogWrite(Motor_L_pwm_pin, 100);
+  
+
+  // Stop motors
+  analogWrite(Motor_R_pwm_pin, 0);
+  analogWrite(Motor_L_pwm_pin, 0);
 
   
 }
 
+
+void countEncoder_left() {
+  encoderCount_left++;
+  Serial.println(encoderCount_left); // ISR increments count
+}
+
+void countEncoder_right() {
+  encoderCount_right++;
+  Serial.println(encoderCount_right); // ISR increments count
+}
 
 /*void runMotors() {
   
