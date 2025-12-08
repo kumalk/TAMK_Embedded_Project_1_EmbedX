@@ -24,7 +24,7 @@ volatile long encoderCount_right = 0;
 float distperpuls = 1.3;
 int travelDist = 100;// travelling distance in mm
 int travelPlan[][5] = {
-  {75,200,'f',0,'l'},{75,200,'f',90,'l'},{75,200,'f',90,'l'},{75,200,'f',90,'l'}
+  {75,200,'f',0,'l'},{25,130,'f',110,'l'},{50,200,'f',110,'l'}
   //{speedPercentage,distanceInMM,'forward/backward',turningAngle,turningDirection},{25,50,'f',170},{75,100,'f',290}
 };
 int currentTargetPulsCount = 0;  
@@ -49,6 +49,7 @@ int maxX[] = {0,522,1023}; // These are the left maximum , middle and right maxi
 int maxY[] = {0,494,1023}; // These are the left maximum , middle and right maximum analog values of the joystic direction in y axis
 volatile bool buttonPressedFlag = false;  // ISR sets this flag to identify button pressed , so loop can uodate the display
 volatile float bearingDegrees = 0;
+int targetBearing = 60;
 // LCD
 const int rs = 37, en = 36, d4 = 35, d5 = 34, d6 = 33, d7 = 32; // definiing LCD screen pins
 LiquidCrystal lcd(rs, en, d4, d5, d6, d7); // Creating LiquidCrystal object from imported class from the library at the top,  by passing LCD screen pins.
@@ -59,7 +60,7 @@ void setup() {
 
   pinMode(ANALOG_BUTTON_PIN, INPUT_PULLUP);  //adding input pullup to JoystickButtonPress pin
   attachInterrupt(digitalPinToInterrupt(ANALOG_BUTTON_PIN), joyPressed, FALLING); //ISR adding at falling edge so ISR function joyPressed function called after press completes.
-
+ 
   pinMode(Motor_L_dir_pin, OUTPUT); // Left motor direction pin as output
   pinMode(Motor_R_dir_pin, OUTPUT); // Right motor direction pin as output
   pinMode(Motor_L_pwm_pin, OUTPUT); // Left motor power(speed) pin as output
@@ -72,53 +73,15 @@ void setup() {
 }
 
 void loop() {
-  if (buttonPressedFlag) {
-    buttonPressedFlag = false;
-    currentTravelSection = 0;
-    encoderCount_left = 0;
-    encoderCount_right = 0;
-    currentTargetPulsCount = targetPulsCountCalc(travelPlan[currentTravelSection][1]);
-    runMotors(travelPlan[currentTravelSection][0],travelPlan[currentTravelSection][2],travelPlan[currentTravelSection][3],travelPlan[currentTravelSection][4]);
-    motorRunning = true;
-  }
-
-  // --- Motor Movement Control ---
-  if (motorRunning && encoderCount_left >= currentTargetPulsCount) {
-    
-    // Stop the motor immediately after meeting the pulse count goal
-    stopMotors(); 
-
-    currentTravelSection++; // Advance to the next section index
-
-    // Check if the plan is complete (Total sections is 3, indices are 0, 1, 2)
-    // If the index is 3 or more, the plan is finished.
-    if (currentTravelSection >= totalSectionsInTravelPlan) { 
-      
-      Serial.println("--- Travel Plan Completed and Stopped ---");
-    } else {
-      // If there are more sections, start the next segment
-      encoderCount_left = 0;
-      encoderCount_right = 0;
-      
-      // Load the new target pulse count
-      currentTargetPulsCount = targetPulsCountCalc(travelPlan[currentTravelSection][1]);
-      
-      // Start the motors for the new section
-      runMotors(travelPlan[currentTravelSection][0],
-                travelPlan[currentTravelSection][2],
-                travelPlan[currentTravelSection][3],
-                travelPlan[currentTravelSection][4]);
-      
-      motorRunning = true; // runMotors() doesn't set this, so we set it here.
-    }
-  }
-  
-  // --- Non-Motor Tasks ---
+ 
   bearingDegrees = readBearing16Bit();
-
   updateScreen();
 
-  delay(20);
+  if (!isBearingCorrect(targetBearing)) {
+    turnToBearing(targetBearing, 'r'); // Rotate towards the target bearing automatically
+  }
+
+  delay(50); 
 }
 
 

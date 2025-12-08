@@ -23,13 +23,15 @@ volatile long encoderCount_left = 0;
 volatile long encoderCount_right = 0;
 float distperpuls = 1.3;
 int travelDist = 100;// travelling distance in mm
-int travelPlan[][5] = {
-  {75,200,'f',0,'l'},{75,200,'f',90,'l'},{75,200,'f',90,'l'},{75,200,'f',90,'l'}
+int travelPlan[1][5] = {
+  {75,0,'f',0,'l'}
+  //{75,200,'f',0,'l'},{75,200,'f',90,'l'},{75,200,'f',90,'l'},{75,200,'f',90,'l'}
   //{speedPercentage,distanceInMM,'forward/backward',turningAngle,turningDirection},{25,50,'f',170},{75,100,'f',290}
 };
 int currentTargetPulsCount = 0;  
 int currentTravelSection = 0;
 int totalSectionsInTravelPlan = sizeof(travelPlan) / sizeof(travelPlan[0]); 
+String LCDcommandText = "";
 
 
 bool motorRunning = false;
@@ -72,6 +74,62 @@ void setup() {
 }
 
 void loop() {
+  if (Serial.available() > 0){
+    String message = Serial.readStringUntil('\n');
+    Serial.print("Message received, content: ");
+    Serial.println(message);
+    int pos_s = message.indexOf("Move:");
+    int pos_r = message.indexOf("degree:");
+    int pos_l = message.indexOf("lcd:");
+    if(pos_s > -1){
+      LCDcommandText = message;
+      Serial.println("Command = Dist");
+      pos_s = message.indexOf(":");
+        if(pos_s >-1){
+          String sometexthere = message.substring(pos_s+1);
+          
+          if(sometexthere.toInt()>0){
+            travelPlan[0][2]='f';
+            travelPlan[0][1] = abs(sometexthere.toInt()) *10;
+            travelPlan[0][3]=0;
+          }else{
+            travelPlan[0][1] = abs(sometexthere.toInt()) *10;
+            travelPlan[0][2]='b';
+            travelPlan[0][3]=0;
+          }
+         
+          buttonPressedFlag = true;
+        }
+    }
+
+    if(pos_r > -1){
+      Serial.println("Command = Degree");
+      LCDcommandText = message;
+      pos_r = message.indexOf(":");
+        if(pos_r >-1){
+          String sometexthere = message.substring(pos_r+1);
+          
+            char rotationDir;
+            travelPlan[0][3] = getRotationAngle(sometexthere.toInt(), rotationDir);
+            travelPlan[0][4] = rotationDir; // store direction in travelPlan
+            travelPlan[0][1]=0;
+          buttonPressedFlag = true;
+        }
+    }
+
+    if(pos_l > -1){
+      Serial.println("Command = LCD");
+      LCDcommandText = message;
+      pos_l = message.indexOf(":");
+        if(pos_l >-1){
+          String sometexthere = message.substring(pos_l+1);
+          
+          travelPlan[0][1]=0;
+          travelPlan[0][3]=0;
+          //buttonPressedFlag = true;
+        }
+    }
+  }
   if (buttonPressedFlag) {
     buttonPressedFlag = false;
     currentTravelSection = 0;
@@ -268,12 +326,12 @@ void stopMotors(){
 
 void countEncoder_left() {
   encoderCount_left++;
-  Serial.println(encoderCount_left); // ISR increments count
+  //Serial.println(encoderCount_left); // ISR increments count
 }
 
 void countEncoder_right() {
   encoderCount_right++;
-  Serial.println(encoderCount_right); // ISR increments count
+  //Serial.println(encoderCount_right); // ISR increments count
 }
 
 
@@ -312,9 +370,13 @@ void updateScreen(){
   lcd.print("Bearing :");
   lcd.print(bearingDegrees,1);
 
+  // lcd.setCursor(0, 4);
+  // lcd.print("Direction :");
+  // lcd.println(getDirection(int(bearingDegrees)));
+
   lcd.setCursor(0, 1);
-  lcd.print("Direction :");
-  lcd.print(getDirection(int(bearingDegrees)));
+  lcd.print("Command :");
+  lcd.print(LCDcommandText);
 
 }
 // Return Direction according to bearing value
@@ -327,6 +389,33 @@ String getDirection(int bearing) {
   else if (bearing < 248) return "SW";
   else if (bearing < 293) return "W";
   else return "NW";
+}
+
+int rotationAngleCalc(int heading){
+
+}
+
+
+// Function to calculate rotation angle and direction
+// Arguments: current bearing, target bearing
+// Returns: rotation angle (0–180)
+// Output parameter: rotation direction ('l' or 'r')
+int getRotationAngle(int targetBearing, char &rotationDirection) {
+  int diff = targetBearing - bearingDegrees;
+
+  // Normalize difference to range -180 .. 180
+  if (diff > 180) diff -= 360;
+  if (diff < -180) diff += 360;
+
+  // Determine rotation direction
+  if (diff > 0) {
+    rotationDirection = 'r';  // Need to turn right
+  } else {
+    rotationDirection = 'l';  // Need to turn left
+  }
+
+  // Return absolute angle difference
+  return abs(diff);
 }
 
 
