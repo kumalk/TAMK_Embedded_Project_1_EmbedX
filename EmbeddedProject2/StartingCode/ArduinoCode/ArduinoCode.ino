@@ -40,7 +40,7 @@ volatile bool buttonPressedFlag = false;
 // Motor Encoderand Compass Variabls
 volatile long encoderCount_left = 0;
 volatile long encoderCount_right = 0;
-float distperpuls = 1.3; // 1.3 pulses per mm
+float distperpuls = 1.2; // 1.3 pulses per mm
 volatile float bearingDegrees = 0;
 int bearingMaxError = 2; // tolarance in bearing angle for turning accuracy
 int tuningSpeed = 20;  // This is motor speed percentage.When turning speed increase accuracy decreases  
@@ -181,7 +181,7 @@ void loop() {
           LCDcommandText = message;
           Serial.println("Command = ToNorth");
             
-              int NorthDir = 106;
+              int NorthDir = 256;
               char rotationDir;
               travelPlan[0][3] = getRotationAngle(NorthDir, rotationDir);
               travelPlan[0][4] = rotationDir; 
