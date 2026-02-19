@@ -1,33 +1,23 @@
-//---------------------------------------
-// Tampere Universisty of Appied Science
-// Team : EmbedX
-// Final ESP Code 
-// Date : 09/12/2025 
-// Team Members :
-//    Prashantha Kumanayake
-//    Lasanthi Ayesha
-//    Nimeshika Rodrigo 
-//---------------------------------------
-
 #include <ESP8266WiFi.h>        // Library for Wi-Fi functionality
 #include <ESP8266WebServer.h>   // Library to create and manage a web server
 #include <FS.h>                 // Library for working with file systems (SPIFFS)
 
 const char* ssid = "Titenet-IoT";         // Wi-Fi network name (SSID)
 const char* password = "7kDtaphg";  // Wi-Fi network password
-
+String lidarData = "0 cm";  
+String compassData = "0 ";        // Variable to store Compass data
 
 ESP8266WebServer server(80);    // Create an instance of the WebServer on port 80 (default HTTP port)
 
 
 void setup() {
-  Serial.begin(115200);
+  Serial.begin(115200); 
 
-
+  
   // Initialize the file system (SPIFFS) on the ESP8266
   if (!SPIFFS.begin()) {        // Initialize and check success on SPIFFS
-    Serial.println("Error while mounting SPIFFS");
-    return;
+    Serial.println("Error while mounting SPIFFS"); 
+    return; 
   }
 
   // Connect to the Wi-Fi network using the provided SSID and password
@@ -35,7 +25,7 @@ void setup() {
   WiFi.begin(ssid, password);               // Begin connecting to Wi-Fi
   while (WiFi.status() != WL_CONNECTED) {   // Wait in a loop until the connection is successful
     delay(500);
-    Serial.print(".");
+    Serial.print(".");  
   } Serial.println("\nIP address: " + WiFi.localIP().toString()); // Print the IP address of the ESP8266 when connected
 
 
@@ -47,22 +37,13 @@ void setup() {
 
 
   // Define custom actions/function calls for specific URLs (ie when a button press from webpage requests a particular URL)
-  server.on("/forwards5", []() {
-    handleMove(5);
-  });      // When requesting URL "/forwards5", call the handleMove function with parameter 5
-  server.on("/forwards20", []() {
-    handleMove(20);
-  });    // [](){ handleMove(x); } is a lambda function that contains the code
-  server.on("/backwards5", []() {
-    handleMove(-5);
-  });    // to be executed when the route is visited. These lambda functions call
-  server.on("/backwards20", []() {
-    handleMove(-20);
-  });  // handleMove(x) as soon as it's triggered.
-  server.on("/compass", handleCompass);                 // When requesting URL "/compass", call the handleCompass function
-  server.on("/ToNorth", handleNorth);  
-  server.on("/newspeed", handleSpeedUpdate); 
-  server.on("/todir",handleToDir);
+  server.on("/forwards5", [](){ handleMove(5); });      // When requesting URL "/forwards5", call the handleMove function with parameter 5
+  server.on("/forwards20", [](){ handleMove(20); });    // [](){ handleMove(x); } is a lambda function that contains the code  
+  server.on("/backwards5", [](){ handleMove(-5); });    // to be executed when the route is visited. These lambda functions call
+  server.on("/backwards20", [](){ handleMove(-20); });  // handleMove(x) as soon as it's triggered.
+  server.on("/compass", handleCompass);
+  server.on("/compassVal", handleCompassVal);                 // When requesting URL "/compass", call the handleCompass function
+  server.on("/lidar", handleLidar);                     // When requesting URL "/lidar", call the handleLidar function.
 
   //  If someone tries to access a URL that does not exist (e.g. due to a typo), call the handleNotFound function
   server.onNotFound(handleNotFound);
@@ -72,24 +53,31 @@ void setup() {
   server.begin();
 }
 
-
 void loop() {
-  server.handleClient();  // Listen for incoming HTTP requests and respond to them
-}
+  server.handleClient();
 
+  if (Serial.available() > 0) {
+    String data = Serial.readStringUntil('\n');
+    data.trim(); // Critical: remove whitespace
+    
+    if (data.startsWith("LIDAR:")) {
+      lidarData = data.substring(6); // Correct offset for "LIDAR:"
+    } else if (data.startsWith("Compass:")) {
+      compassData = data.substring(8); // Correct offset for "Compass:"
+    }
+}
+}
 
 // This function is called when a non-existing URL is accessed (404 error)
 void handleNotFound() {
   server.send(404, "text/plain", "404: Not Found"); // Send a 404 response with a plain text message
 }
 
-
 // This function handles movement commands like "/forwards5" or "/backwards20"
 void handleMove(int distance) {
   Serial.println("Move:" + String(distance));       // Print the movement distance to the serial monitor for Arduino Mega
   server.send(200);                                 // Send a 200 OK response to the client (browser)
 }
-
 
 // This function handles the compass command (like "/compass?value=30")
 void handleCompass() {
@@ -100,25 +88,11 @@ void handleCompass() {
   server.send(200);
 }
 
-
-void handleSpeedUpdate() {
-  if (server.hasArg("value")) {                     // Check if there is a "value" argument in the request URL
-    String valueString = server.arg("value");       // Get the "value" argument from the URL
-    Serial.println("NewSpeed:" + valueString);          // Print the compass value to the serial monitor
-  }
-  server.send(200);
+// This function handles the lidar command (like "/lidar")
+void handleLidar() {
+  server.send(200, "text/plain", lidarData); // Send the latest Lidar value with a 200 OK status.
 }
 
-
-void handleNorth() {
-  Serial.println("ToNorth");       // Print the movement distance to the serial monitor for Arduino Mega
-  server.send(200);                                 // Send a 200 OK response to the client (browser)
-}
-
-void handleToDir() {
-  if (server.hasArg("value")) {                     // Check if there is a "value" argument in the request URL
-    String valueString = server.arg("value");       // Get the "value" argument from the URL
-    Serial.println("Dir:" + valueString);          // Print the compass value to the serial monitor
-  }
-  server.send(200);
+void handleCompassVal() {
+  server.send(200, "text/plain", compassData); // Send the latest Compass value with a 200 OK status.
 }

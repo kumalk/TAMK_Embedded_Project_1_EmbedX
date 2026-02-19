@@ -12,6 +12,10 @@
 #include <LiquidCrystal.h>
 #include <Wire.h>
 #include "LIDARLite_v4LED.h"
+#include <EEPROM.h> 
+
+// --- EEPROM Address ---
+const int DIST_PER_PULSE_ADDR = 0;
 
 //---Creating Lidar------
 LIDARLite_v4LED myLIDAR;
@@ -66,6 +70,27 @@ int travelPlan[1][5] = {
 int currentTargetPulsCount = 0;  
 int currentTravelSection = 0;
 int totalSectionsInTravelPlan = sizeof(travelPlan) / sizeof(travelPlan[0]);  // this code is previously designed to run preplanned path as multiple sections , so to keep that ability for future as well , I kept the skelton without breaking
+
+//Path planinig.  //{rotation,traveldistance,finalGapLimit}
+int followPlan[4][4] = {
+  {0,'u',30,'l'},
+  {90,'u',15,'l'},
+  {90,'u',30,'l'},
+  {90,'u',15,'l'}
+  
+};
+
+int NorthDir = 0; //hardcoded defualt to use until calibrate
+float GapValue;
+float MaxErrGap = 0.5;
+float currentDistance;
+boolean isBearingLocked = false;
+float LockedbearingDegrees;
+int currentPathStep=0;
+int totalSectionsInPathPlan = sizeof(followPlan) / sizeof(followPlan[0]);
+
+volatile boolean pathFlag=false;
+
 String LCDcommandText = "";
 
 // Joystick Calibration Values
@@ -102,8 +127,22 @@ void setup() {
   pinMode(2, INPUT_PULLUP);
   attachInterrupt(digitalPinToInterrupt(2), countEncoder_left, RISING);
   attachInterrupt(digitalPinToInterrupt(3), countEncoder_right, RISING);
-  
+
   Serial.begin(115200);
+  
+  // Load calibrated distperpuls from EEPROM
+  float storedDist;
+  EEPROM.get(DIST_PER_PULSE_ADDR, storedDist);
+  
+  // Check if a valid value exists (EEPROM defaults to NaN or 0.0 if never written)
+  if (!isnan(storedDist) && storedDist > 0.1) {
+    distperpuls = storedDist;
+    Serial.print("Loaded Calibration from EEPROM: ");
+    Serial.println(distperpuls);
+  } else {
+    Serial.println("No valid calibration in EEPROM. Using default 1.2");
+  }
+
 
   //LIDAR detection
   if (myLIDAR.begin() == false) {
@@ -124,9 +163,10 @@ void loop() {
 
   //follow logic
   if(followFlag){
-    float GapValue = 30.00;
-    float MaxErrGap = 0.50;
-    float currentDistance = getAvgDistance(3);
+    GapValue = 30.00;
+    MaxErrGap = 0.50;
+    currentDistance = getAvgDistance(3);
+    updateScreen();
     Serial.println(currentDistance);
     if(currentDistance > GapValue+ MaxErrGap){
       //run motor forward
@@ -151,6 +191,41 @@ void loop() {
       stopMotors();
     }
   }
+
+  //Path distance keeping logic
+if(pathFlag) {
+    currentDistance = getAvgDistance(3);
+    float bearingError = bearingDegrees - LockedbearingDegrees;
+
+    // Normalize error for 360-degree wrap-around
+    if (bearingError > 180) bearingError -= 360;
+    if (bearingError < -180) bearingError += 360;
+
+    // 1. Check if heading is significantly off (Use a 2-3 degree buffer)
+    if(abs(bearingError) > 3.0) {
+        char correctDir;
+        getRotationAngle(LockedbearingDegrees, correctDir);
+        // Fix ONLY to the locked degree, do not call handleFollowPath
+        turnToBearing(LockedbearingDegrees, correctDir); 
+    } 
+    // 2. If heading is okay, manage distance
+    else {
+        if(currentDistance > GapValue + MaxErrGap) {
+            runMotors(25, 'f', 0, 'r'); // Drive straight
+        } else if(currentDistance < GapValue - MaxErrGap) {
+            runMotors(25, 'b', 0, 'r'); // Back up
+        } else {
+            // STEP COMPLETE
+            stopMotors();
+            pathFlag = false; 
+            if(currentPathStep + 1 < totalSectionsInPathPlan) {
+                currentPathStep++;
+                startNextPathStep(); // Move to the next plan item
+            }
+        }
+    }
+}
+
 
   // --- Check for Mode Change ---
   if (buttonPressedFlag) {
@@ -239,19 +314,21 @@ void loop() {
 //Process Command Function to handle all movement in a resuable way , internally and externally
 
 void processCommand(String message) {
-  int pos_s = message.indexOf("Move:");
-  int pos_r = message.indexOf("Turn:");
-  int pos_l = message.indexOf("lcd:");
-  int pos_n = message.indexOf("ToNorth");
-  int pos_sp = message.indexOf("NewSpeed:");
-  int pos_dir = message.indexOf("Dir:");
-  int pos_rm = message.indexOf("Room");
-  int pos_fl = message.indexOf("Follow");
-
+  int pos_s = message.indexOf("Move:"); //To staight drive forward or backward 
+  int pos_r = message.indexOf("Turn:"); //Turn by spesific angle
+  int pos_l = message.indexOf("lcd:"); //Just LCD command to print
+  int pos_n = message.indexOf("ToNorth"); // Turn to north
+  int pos_sp = message.indexOf("NewSpeed:"); // Set new default speed as percerntage 
+  int pos_dir = message.indexOf("Dir:"); //turn to a spesific riection
+  int pos_rm = message.indexOf("Room"); // Canlculating room volume by LIDAR
+  int pos_fl = message.indexOf("Follow"); // Follow an object maintaining spesific hardcoded distance 
+  int pos_pt = message.indexOf("Path"); // Go around a box by maintianing custom hardcoded distances from the walls 
+  int pos_cl = message.indexOf("NCal"); //For North direction calibration
+  int pos_calibrate = message.indexOf("DPCal"); // Calibrate distance per puls value by LDR data and save in EEPROM
 
         
 
-   if(pos_s > -1){
+   if(pos_s > -1){   //To staight drive forward or backward 
       LCDcommandText = message;
       Serial.println("Command = Dist");
       pos_s = message.indexOf(":");
@@ -271,7 +348,7 @@ void processCommand(String message) {
       }
     }     
 
-        if(pos_r > -1){
+        if(pos_r > -1){   //Turn by spesific angle
           LCDcommandText = message;
           Serial.println("Command = Turn");
           pos_r = message.indexOf(":");
@@ -290,7 +367,7 @@ void processCommand(String message) {
             }
         }
 
-        if(pos_sp > -1){
+        if(pos_sp > -1){ // Set new default speed as percerntage 
           LCDcommandText = message;
           Serial.println("Command = NewSpeed");
           pos_r = message.indexOf(":");
@@ -302,11 +379,10 @@ void processCommand(String message) {
             }
         }
 
-        if(pos_n > -1){
+        if(pos_n > -1){ // Turn to north
           LCDcommandText = message;
           Serial.println("Command = ToNorth");
             
-              int NorthDir = 256;
               char rotationDir;
               travelPlan[0][3] = getRotationAngle(NorthDir, rotationDir);
               travelPlan[0][4] = rotationDir; 
@@ -314,7 +390,7 @@ void processCommand(String message) {
               buttonPressedFlag = true;
         }
 
-        if(pos_dir>-1){
+        if(pos_dir>-1){ //turn to a spesific riection
           LCDcommandText = message;
           Serial.println("Command = Dir");
           pos_dir = message.indexOf(":");
@@ -330,25 +406,52 @@ void processCommand(String message) {
             }
         }
 
-        if(pos_l > -1){
+        if(pos_l > -1){ //Just LCD command to print
           LCDcommandText = message;
           Serial.println("Command = LCD");
         }
 
-        if(pos_rm > -1){
+        if(pos_rm > -1){  // Canlculating room volume by LIDAR
           GetRoomMeasurements();
         
         }
 
-        if(pos_fl > -1){
+        if(pos_fl > -1){ // Follow an object maintaining spesific hardcoded distance
           stopMotors();
           if(followFlag==false){
             followFlag=true;
-            Serial.println("Follow mode turned on!");
+            Serial.println('Follow mode turned on!');
           }else{
             followFlag=false;
-            Serial.println("Follow mode is off!");
+            Serial.println('Follow mode is off!');
           }
+        }
+
+        if(pos_pt > -1){ // Go around a box by maintianing custom hardcoded distances from the walls 
+          stopMotors();
+          if(pathFlag == false){
+            Serial.println("Follow Path mode turned on!");
+            encoderCount_left = 0;
+            currentPathStep = 0;   // Reset to the beginning of your plan
+            startNextPathStep();   // USE THE NEW FUNCTION HERE
+          } else {
+            pathFlag = false;
+            Serial.println("Follow Path mode is off!");
+          }
+        }
+
+        if(pos_cl > -1){
+          LCDcommandText = message;
+          Serial.println("Command = NCal");
+          NorthDir = bearingDegrees;
+
+          
+        }
+
+        if(pos_calibrate > -1){
+          Serial.println("Starting Calibration Routine...");
+          Serial.println("Command = DPCal");
+          calibrateEncoders();
         }
       
       
@@ -584,8 +687,14 @@ void updateScreen(){
   
   if (controlMode == "ESP") {
     // [ ] ESP commands: Displays the latest command given from ESP (only in ESP mode)
+    if(pathFlag==true){
+      lcd.print("Dist:");
+      lcd.print(encoderCount_left*distperpuls/10);
+      lcd.print("cm");
+    }else{
     lcd.print("CMD:");
     lcd.print(LCDcommandText);
+    }
   } else { 
     // [ ] Joystick values: Displays analog values for both joystick axes (only in joystick mode)
     lcd.print("X:");
@@ -664,4 +773,84 @@ float GetRoomMeasurements(){
   Serial.println("cm^3");
 
 }
- 
+
+float handleFollowPath(){
+  turnToBearing(targetBearingCal(followPlan[currentPathStep][0],followPlan[currentPathStep][3]),followPlan[currentPathStep][3]);
+  LockedbearingDegrees=bearingDegrees;
+  GapValue=followPlan[currentPathStep][2];
+  pathFlag=true;
+}
+
+void startNextPathStep() {
+  // 1. Calculate the target bearing ONCE based on where we were
+  int turnAmount = followPlan[currentPathStep][0];
+  char turnDir = followPlan[currentPathStep][3];
+  
+  // Calculate the absolute target heading we WANT to reach
+  int targetHeading = targetBearingCal(turnAmount, turnDir);
+  
+  // 2. Perform the physical turn
+  turnToBearing(targetHeading, turnDir);
+  
+  // 3. LOCK this absolute heading for the duration of this step
+  LockedbearingDegrees = targetHeading; 
+  GapValue = followPlan[currentPathStep][2];
+  
+  pathFlag = true;
+  Serial.print("Step Initialized. Target Heading: ");
+  Serial.println(LockedbearingDegrees);
+}
+
+void toNorth(){
+  char rotationDir;
+  travelPlan[0][3] = getRotationAngle(NorthDir, rotationDir);
+  travelPlan[0][4] = rotationDir; 
+  travelPlan[0][1]=0;
+  buttonPressedFlag = true;
+}
+
+
+void calibrateEncoders() {
+  stopMotors();
+  delay(1000);
+  
+  float startDist = getAvgDistance(5);
+  float targetDist = startDist - 20.0; // Moving 20cm forward (distance to wall decreases)
+  
+  encoderCount_left = 0;
+  encoderCount_right = 0;
+  
+  Serial.println("Driving 20cm for calibration...");
+
+  // Drive forward until LiDAR shows we moved 20cm
+  while (getAvgDistance(2) > targetDist) {
+    digitalWrite(Motor_L_dir_pin, Motor_forward);
+    digitalWrite(Motor_R_dir_pin, Motor_forward);
+    analogWrite(Motor_L_pwm_pin, motorSpeed(25)); // Steady slow speed
+    analogWrite(Motor_R_pwm_pin, motorSpeed(25));
+    
+    // Safety check: if distance is too small, stop
+    if (getAvgDistance(1) < 10) break; 
+  }
+  
+  stopMotors();
+  delay(500);
+  
+  float actualDistMoved = (startDist - getAvgDistance(10)) * 10.0; // convert to mm
+  long totalPulses = encoderCount_left; // Use left encoder as reference
+  
+  if (totalPulses > 0) {
+    // Calibration formula: pulses / mm
+    distperpuls = (float)totalPulses / actualDistMoved;
+    
+    // Save to EEPROM
+    EEPROM.put(DIST_PER_PULSE_ADDR, distperpuls);
+    
+    Serial.print("Calibration Complete!");
+    Serial.print(" Pulses: "); Serial.print(totalPulses);
+    Serial.print(" | Dist: "); Serial.print(actualDistMoved); Serial.println("mm");
+    Serial.print("New distperpuls saved: "); Serial.println(distperpuls);
+  } else {
+    Serial.println("Calibration Failed: No pulses detected.");
+  }
+}

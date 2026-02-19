@@ -66,6 +66,24 @@ int travelPlan[1][5] = {
 int currentTargetPulsCount = 0;  
 int currentTravelSection = 0;
 int totalSectionsInTravelPlan = sizeof(travelPlan) / sizeof(travelPlan[0]);  // this code is previously designed to run preplanned path as multiple sections , so to keep that ability for future as well , I kept the skelton without breaking
+
+//Path planinig.  //{rotation,traveldistance,finalGapLimit}
+int followPlan[2][4] = {
+  {0,'u',15,'l'},
+  {90,'u',15,'r'},
+  
+};
+
+float GapValue;
+float MaxErrGap = 0.5;
+float currentDistance;
+boolean isBearingLocked = false;
+float LockedbearingDegrees;
+int currentPathStep=0;
+int totalSectionsInPathPlan = sizeof(followPlan) / sizeof(followPlan[0]);
+
+volatile boolean pathFlag=false;
+
 String LCDcommandText = "";
 
 // Joystick Calibration Values
@@ -124,9 +142,10 @@ void loop() {
 
   //follow logic
   if(followFlag){
-    float GapValue = 30.00;
-    float MaxErrGap = 0.50;
-    float currentDistance = getAvgDistance(3);
+    GapValue = 30.00;
+    MaxErrGap = 0.50;
+    currentDistance = getAvgDistance(3);
+
     Serial.println(currentDistance);
     if(currentDistance > GapValue+ MaxErrGap){
       //run motor forward
@@ -151,6 +170,43 @@ void loop() {
       stopMotors();
     }
   }
+
+  //Path distance keeping logic
+if(pathFlag){
+    MaxErrGap = 0.50;
+    currentDistance = getAvgDistance(3);
+
+    Serial.println(currentDistance);
+    if(currentDistance > GapValue+ MaxErrGap){
+      //run motor forward
+      if(currentDistance >GapValue+  3*MaxErrGap){
+      //run motor forward slowly
+      runMotors(50,'f',0,'r');
+      }else{
+        //run fast forward
+        runMotors(20,'f',0,'r');
+      }
+
+    }else if(currentDistance < GapValue - MaxErrGap){
+      //run motor backward
+      if(currentDistance < GapValue-  3*MaxErrGap){
+      //run motor backward slowly
+      runMotors(50,'b',0,'r');
+      }else{
+        //run fast backward
+        runMotors(20,'b',0,'r');
+      }
+    }else{
+      stopMotors();
+      pathFlag=false;
+      if(currentPathStep+1 < totalSectionsInPathPlan){
+        currentPathStep++;
+        handleFollowPath();
+      }
+
+    }
+  }
+
 
   // --- Check for Mode Change ---
   if (buttonPressedFlag) {
@@ -247,7 +303,7 @@ void processCommand(String message) {
   int pos_dir = message.indexOf("Dir:");
   int pos_rm = message.indexOf("Room");
   int pos_fl = message.indexOf("Follow");
-
+  int pos_pt = message.indexOf("Path");
 
         
 
@@ -344,10 +400,21 @@ void processCommand(String message) {
           stopMotors();
           if(followFlag==false){
             followFlag=true;
-            Serial.println("Follow mode turned on!");
+            Serial.println('Follow mode turned on!');
           }else{
             followFlag=false;
-            Serial.println("Follow mode is off!");
+            Serial.println('Follow mode is off!');
+          }
+        }
+
+        if(pos_pt > -1){
+          stopMotors();
+          if(followFlag==false){
+            Serial.println('Follow Path mode turned on!');
+            handleFollowPath();
+          }else{
+            followFlag=false;
+            Serial.println('Follow Path mode is off!');
           }
         }
       
@@ -663,5 +730,12 @@ float GetRoomMeasurements(){
   Serial.print(RoomData[5]);
   Serial.println("cm^3");
 
+}
+
+float handleFollowPath(){
+  turnToBearing(targetBearingCal(followPlan[currentPathStep][0],followPlan[currentPathStep][3]),followPlan[currentPathStep][3]);
+  LockedbearingDegrees=bearingDegrees;
+  GapValue=followPlan[currentPathStep][2];
+  pathFlag=true;
 }
  

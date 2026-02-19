@@ -39,13 +39,19 @@ volatile boolean followFlag=false;
 #define ANALOG_Y_PIN A9 
 #define ANALOG_BUTTON_PIN 19 
 
+// LIDAR_Mode_PushButton
+#define LidarButtonPin 18
+volatile bool LidarButtonPressedFlag = false;
+
+
+
 // LCD Pins
 const int rs = 37, en = 36, d4 = 35, d5 = 34, d6 = 33, d7 = 32; 
 
 // --- Global Variables ---
 String controlMode = "ESP"; 
 volatile unsigned long lastInterruptTime = 0; 
-volatile bool buttonPressedFlag = false; 
+volatile bool joyButtonPressedFlag= false; 
 
 // Motor Encoderand Compass Variabls
 volatile long encoderCount_left = 0;
@@ -91,6 +97,11 @@ void setup() {
   // Joystick Button Setup (Mode Toggle)
   pinMode(ANALOG_BUTTON_PIN, INPUT_PULLUP);
   attachInterrupt(digitalPinToInterrupt(ANALOG_BUTTON_PIN), joyPressed, FALLING); 
+
+  //Lidar Mode Button
+  pinMode(LidarButtonPin, INPUT_PULLUP);
+  attachInterrupt(digitalPinToInterrupt(LidarButtonPin), lidarButtonPressed, FALLING);
+  
 
   // Motor Pins Setup
   pinMode(Motor_L_dir_pin, OUTPUT); 
@@ -153,8 +164,8 @@ void loop() {
   }
 
   // --- Check for Mode Change ---
-  if (buttonPressedFlag) {
-    buttonPressedFlag = false;
+  if (joyButtonPressedFlag) {
+    joyButtonPressedFlag= false;
     stopMotors(); 
     Serial.print("Current Mode: ");
     Serial.println(controlMode);
@@ -197,8 +208,8 @@ void loop() {
   }
 
   // 2. Start Travel Plan
-      if (buttonPressedFlag) {
-        buttonPressedFlag = false;
+      if (joyButtonPressedFlag) {
+        joyButtonPressedFlag= false;
         currentTravelSection = 0;
         encoderCount_left = 0;
         encoderCount_right = 0;
@@ -267,7 +278,7 @@ void processCommand(String message) {
           travelPlan[0][2]='b';
           travelPlan[0][3]=0;
         }
-        buttonPressedFlag = true;
+        joyButtonPressedFlag= true;
       }
     }     
 
@@ -286,7 +297,7 @@ void processCommand(String message) {
                   travelPlan[0][4] = 'r';
                 }
                 travelPlan[0][1]=0;
-              buttonPressedFlag = true;
+              joyButtonPressedFlag= true;
             }
         }
 
@@ -298,7 +309,7 @@ void processCommand(String message) {
               String sometexthere = message.substring(pos_r+1);
               travelPlan[0][0] = abs(sometexthere.toInt());
               travelPlan[0][1]=0;
-              buttonPressedFlag = true;
+              joyButtonPressedFlag= true;
             }
         }
 
@@ -311,7 +322,7 @@ void processCommand(String message) {
               travelPlan[0][3] = getRotationAngle(NorthDir, rotationDir);
               travelPlan[0][4] = rotationDir; 
               travelPlan[0][1]=0;
-              buttonPressedFlag = true;
+              joyButtonPressedFlag= true;
         }
 
         if(pos_dir>-1){
@@ -325,7 +336,7 @@ void processCommand(String message) {
               travelPlan[0][3] = getRotationAngle(turnToDir, rotationDir);
               travelPlan[0][4] = rotationDir; 
               travelPlan[0][1]=0;
-              buttonPressedFlag = true;
+              joyButtonPressedFlag= true;
              
             }
         }
@@ -344,10 +355,10 @@ void processCommand(String message) {
           stopMotors();
           if(followFlag==false){
             followFlag=true;
-            Serial.println("Follow mode turned on!");
+            Serial.println('Follow mode turned on!');
           }else{
             followFlag=false;
-            Serial.println("Follow mode is off!");
+            Serial.println('Follow mode is off!');
           }
         }
       
@@ -394,7 +405,8 @@ void joyPressed(){
     lastInterruptTime = interruptTime;
     Serial.println("JoyPressed! Toggling mode.");
     toggleMode(); 
-    buttonPressedFlag = true; 
+    joyButtonPressedFlag= true;
+    LidarButtonPressedFlag = false;
   }
 }
 
@@ -403,6 +415,27 @@ void toggleMode(){
       controlMode="JOY";
     }else{
       controlMode="ESP";
+    }
+}
+
+// --- LidarModeButtonPress ISR function for handling ---
+void lidarButtonPressed(){
+  unsigned long interruptTime = millis();
+  if (interruptTime - lastInterruptTime > 200) {
+    lastInterruptTime = interruptTime;
+    Serial.println("LidarModeButtonPressed! LIDAR Mode Active!");
+    lidarBtntoggleMode();
+    LidarButtonPressedFlag = true; 
+    joyButtonPressedFlag= false; 
+    
+}
+}
+
+void lidarBtntoggleMode(){
+    if(controlMode=="LDR"){
+      controlMode="ESP";
+    }else{
+      controlMode="LDR";
     }
 }
 

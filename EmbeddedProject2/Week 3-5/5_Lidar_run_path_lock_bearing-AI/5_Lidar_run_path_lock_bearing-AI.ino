@@ -66,6 +66,26 @@ int travelPlan[1][5] = {
 int currentTargetPulsCount = 0;  
 int currentTravelSection = 0;
 int totalSectionsInTravelPlan = sizeof(travelPlan) / sizeof(travelPlan[0]);  // this code is previously designed to run preplanned path as multiple sections , so to keep that ability for future as well , I kept the skelton without breaking
+
+//Path planinig.  //{rotation,traveldistance,finalGapLimit}
+int followPlan[4][4] = {
+  {0,'u',30,'l'},
+  {90,'u',15,'l'},
+  {90,'u',30,'l'},
+  {90,'u',15,'l'}
+  
+};
+
+float GapValue;
+float MaxErrGap = 0.5;
+float currentDistance;
+boolean isBearingLocked = false;
+float LockedbearingDegrees;
+int currentPathStep=0;
+int totalSectionsInPathPlan = sizeof(followPlan) / sizeof(followPlan[0]);
+
+volatile boolean pathFlag=false;
+
 String LCDcommandText = "";
 
 // Joystick Calibration Values
@@ -124,9 +144,10 @@ void loop() {
 
   //follow logic
   if(followFlag){
-    float GapValue = 30.00;
-    float MaxErrGap = 0.50;
-    float currentDistance = getAvgDistance(3);
+    GapValue = 30.00;
+    MaxErrGap = 0.50;
+    currentDistance = getAvgDistance(3);
+    updateScreen();
     Serial.println(currentDistance);
     if(currentDistance > GapValue+ MaxErrGap){
       //run motor forward
@@ -151,6 +172,41 @@ void loop() {
       stopMotors();
     }
   }
+
+  //Path distance keeping logic
+if(pathFlag) {
+    currentDistance = getAvgDistance(3);
+    float bearingError = bearingDegrees - LockedbearingDegrees;
+
+    // Normalize error for 360-degree wrap-around
+    if (bearingError > 180) bearingError -= 360;
+    if (bearingError < -180) bearingError += 360;
+
+    // 1. Check if heading is significantly off (Use a 2-3 degree buffer)
+    if(abs(bearingError) > 3.0) {
+        char correctDir;
+        getRotationAngle(LockedbearingDegrees, correctDir);
+        // Fix ONLY to the locked degree, do not call handleFollowPath
+        turnToBearing(LockedbearingDegrees, correctDir); 
+    } 
+    // 2. If heading is okay, manage distance
+    else {
+        if(currentDistance > GapValue + MaxErrGap) {
+            runMotors(25, 'f', 0, 'r'); // Drive straight
+        } else if(currentDistance < GapValue - MaxErrGap) {
+            runMotors(25, 'b', 0, 'r'); // Back up
+        } else {
+            // STEP COMPLETE
+            stopMotors();
+            pathFlag = false; 
+            if(currentPathStep + 1 < totalSectionsInPathPlan) {
+                currentPathStep++;
+                startNextPathStep(); // Move to the next plan item
+            }
+        }
+    }
+}
+
 
   // --- Check for Mode Change ---
   if (buttonPressedFlag) {
@@ -247,7 +303,7 @@ void processCommand(String message) {
   int pos_dir = message.indexOf("Dir:");
   int pos_rm = message.indexOf("Room");
   int pos_fl = message.indexOf("Follow");
-
+  int pos_pt = message.indexOf("Path");
 
         
 
@@ -344,10 +400,23 @@ void processCommand(String message) {
           stopMotors();
           if(followFlag==false){
             followFlag=true;
-            Serial.println("Follow mode turned on!");
+            Serial.println('Follow mode turned on!');
           }else{
             followFlag=false;
-            Serial.println("Follow mode is off!");
+            Serial.println('Follow mode is off!');
+          }
+        }
+
+        if(pos_pt > -1){
+          stopMotors();
+          if(pathFlag == false){
+            Serial.println("Follow Path mode turned on!");
+            encoderCount_left = 0;
+            currentPathStep = 0;   // Reset to the beginning of your plan
+            startNextPathStep();   // USE THE NEW FUNCTION HERE
+          } else {
+            pathFlag = false;
+            Serial.println("Follow Path mode is off!");
           }
         }
       
@@ -584,8 +653,14 @@ void updateScreen(){
   
   if (controlMode == "ESP") {
     // [ ] ESP commands: Displays the latest command given from ESP (only in ESP mode)
+    if(pathFlag==true){
+      lcd.print("Dist:");
+      lcd.print(encoderCount_left*distperpuls/10);
+      lcd.print("cm");
+    }else{
     lcd.print("CMD:");
     lcd.print(LCDcommandText);
+    }
   } else { 
     // [ ] Joystick values: Displays analog values for both joystick axes (only in joystick mode)
     lcd.print("X:");
@@ -663,5 +738,32 @@ float GetRoomMeasurements(){
   Serial.print(RoomData[5]);
   Serial.println("cm^3");
 
+}
+
+float handleFollowPath(){
+  turnToBearing(targetBearingCal(followPlan[currentPathStep][0],followPlan[currentPathStep][3]),followPlan[currentPathStep][3]);
+  LockedbearingDegrees=bearingDegrees;
+  GapValue=followPlan[currentPathStep][2];
+  pathFlag=true;
+}
+
+void startNextPathStep() {
+  // 1. Calculate the target bearing ONCE based on where we were
+  int turnAmount = followPlan[currentPathStep][0];
+  char turnDir = followPlan[currentPathStep][3];
+  
+  // Calculate the absolute target heading we WANT to reach
+  int targetHeading = targetBearingCal(turnAmount, turnDir);
+  
+  // 2. Perform the physical turn
+  turnToBearing(targetHeading, turnDir);
+  
+  // 3. LOCK this absolute heading for the duration of this step
+  LockedbearingDegrees = targetHeading; 
+  GapValue = followPlan[currentPathStep][2];
+  
+  pathFlag = true;
+  Serial.print("Step Initialized. Target Heading: ");
+  Serial.println(LockedbearingDegrees);
 }
  
