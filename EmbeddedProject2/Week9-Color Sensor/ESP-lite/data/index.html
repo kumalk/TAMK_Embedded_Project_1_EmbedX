@@ -1,0 +1,76 @@
+<!DOCTYPE HTML>
+<html lang="en">
+
+<head>
+	<meta charset="UTF-8">
+	<title>EmbedX</title>
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<link rel="icon" href="favicon.ico">
+	<link rel="stylesheet" type="text/css" href="style.css">
+	<script src="script.js" defer></script>
+	<!-- Defer ensures that page contents load first and JavaScript runs only after that -->
+</head>
+
+<body>
+	<h1 class="page-title">EmbedX</h1>
+
+	<div class="main-layout">
+		<!-- Card 1: Control & Feedback  -->
+		<div class="card card-wide">
+
+			<!-- Inline Live Sensor Data -->
+			<div class="sensor-inline">
+				<div class="sensor-item-inline text-blue">
+					<span class="sensor-icon">📏</span> <span id="lidarText">0 cm</span>
+				</div>
+				<div class="sensor-item-inline text-green">
+					<span class="sensor-icon">🧭</span> <span id="compassText">0</span>°
+				</div>
+				<div class="sensor-item-inline text-dark">
+					<span class="sensor-icon">🎨</span>
+					<div id="colorBox" class="color-preview-inline"></div>
+					<!-- Color box sized down slightly for inline view -->
+				</div>
+			</div>
+
+			<!-- Grid Motor Buttons -->
+			<div class="container">
+				<button class="button" onclick="forwards5()">⬆️ 5cm</button>
+				<button class="button" onclick="forwards20()">⬆️ 20cm</button>
+				<button class="button button-secondary" onclick="backwards5()">⬇️ 5cm</button>
+				<button class="button button-secondary" onclick="backwards20()">⬇️ 20cm</button>
+			</div>
+		</div>
+
+		<!-- Card 2: Navigation  -->
+		<div class="card card-wide">
+			<h2 class="card-title">Compass Control </h2>
+
+			<div class="slider-container">
+				<input type="range" class="modern-slider" min="-360" max="360" step="5" id="compassSlider"
+					oninput="updateCompass(this.value)" onchange="sendCompassValue(this.value)" value="0" />
+				<div id="compassValue">0°</div>
+			</div>
+
+			<div class="nav-controls">
+				<div class="control-item">
+					<button class="button button-round" onclick="turnToNorth()">⬆️<br>North</button>
+				</div>
+				<div class="control-item">
+					<label for="speedVal">⚡ Speed</label>
+					<input type="number" class="modern-input" value="75" id="speedVal"
+						onchange="speedUpdate(this.value)">
+					<div id="speedWarninng" class="warning-box">⚠️ 0-100</div>
+				</div>
+				<div class="control-item turn-direction-inline">
+					<label for="dirVal">🔄 Turn To</label>
+					<input name="dirVal" type="number" class="modern-input" placeholder="0-359" id="dirVal"
+						onchange="dirUpdate(this.value)">
+					<div id="dirWarninng" class="warning-box">⚠️ 0-359</div>
+				</div>
+			</div>
+		</div>
+	</div>
+</body>
+
+</html>

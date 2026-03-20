@@ -1,0 +1,382 @@
+//---------------------------------------
+// Tampere Universisty of Appied Science
+// Team : EmbedX
+// Final Aruduino Code 
+// Date : 12/02/2026 
+// Team Members :
+//    Prashantha Kumanayake
+//    Lasanthi Ayesha
+//    Nimeshika Rodrigo 
+//---------------------------------------
+
+#include <LiquidCrystal.h>
+#include <Wire.h>
+#include "LIDARLite_v4LED.h"
+#include <EEPROM.h> 
+#include "DFRobot_TCS34725.h"
+
+
+// --- Color Sensor ---
+DFRobot_TCS34725 tcs = DFRobot_TCS34725(&Wire, TCS34725_ADDRESS,TCS34725_INTEGRATIONTIME_24MS, TCS34725_GAIN_1X);
+
+
+// --- EEPROM Address ---
+const int DIST_PER_PULSE_ADDR = 0;
+
+//---Creating Lidar------
+LIDARLite_v4LED myLIDAR;
+int newDistance;
+int DistanceSampleSize=10;
+//FOr Room measurement and store calculated values
+float RoomData[6]; //[fwDist,riDist,bkDist,lfDist,calcArea,clacVolume]
+volatile boolean followFlag=false;
+
+
+//--- Configuration Constants ---
+#define Motor_forward   1
+#define Motor_return    0
+#define CMPS14_ADDRESS  0x60 //I2C address for compass
+
+// --- Pin Definitions ---
+// Motor Pins
+#define Motor_L_dir_pin 8
+#define Motor_R_dir_pin 7
+#define Motor_L_pwm_pin 10
+#define Motor_R_pwm_pin 9
+
+// Joystick Pins
+#define ANALOG_X_PIN A8
+#define ANALOG_Y_PIN A9 
+#define ANALOG_BUTTON_PIN 19 
+
+// LCD Pins
+const int rs = 37, en = 36, d4 = 35, d5 = 34, d6 = 33, d7 = 32; 
+
+// --- Global Variables ---
+String controlMode = "ESP"; 
+volatile unsigned long lastInterruptTime = 0; 
+volatile bool TravelFlag = false; 
+volatile bool joyPressedFlag = false; 
+
+// Motor Encoderand Compass Variabls
+volatile long encoderCount_left = 0;
+volatile long encoderCount_right = 0;
+float distperpuls = 1.2; // 1.2 pulses per mm
+volatile float bearingDegrees = 0;
+int bearingMaxError = 2; // tolarance in bearing angle for turning accuracy
+int tuningSpeed = 20;  // This is motor speed percentage.When turning speed increase accuracy decreases  
+bool motorRunning = false; // status of motors
+int joyX_val = 0; // Raw joystick X reading for LCD
+int joyY_val = 0; // Raw joystick Y reading for LCD
+
+
+int currentTargetPulsCount = 0;  
+
+//Path planinig.  //{Speed as %,Distance(mm),'f'/'b',rotationAngle(deg),rotationDirection(l/r)}
+int goPlan[5] = {50,0,'f',90,'l'};
+volatile bool goFlag = false;
+
+//Path planinig.  //{rotationAngleinDegrees,placeholderElementforLaterUse,travelDistanceinCM,rotationDirection}
+int followPlan[4][4] = {
+  {0,'u',30,'l'},
+  {90,'u',15,'l'},
+  {90,'u',30,'l'},
+  {90,'u',15,'l'}
+  
+};
+
+int NorthDir = 0; //hardcoded defualt to use until calibrate
+float GapValue;
+float MaxErrGap = 0.5;
+float currentDistance;
+float tartgetDistance;
+boolean isBearingLocked = false;
+float LockedbearingDegrees;
+int currentPathStep=0;
+int totalSectionsInPathPlan = sizeof(followPlan) / sizeof(followPlan[0]);
+
+volatile boolean pathFlag=false;
+
+String LCDcommandText = "";
+
+// Joystick Calibration Values
+int maxX[] = {0,522,1023}; 
+int maxY[] = {0,494,1023}; 
+
+// LCD Object
+LiquidCrystal lcd(rs, en, d4, d5, d6, d7); 
+
+// --- Structures ---
+struct Joystick {
+  int x = 0;
+  int y = 0;
+};
+ 
+// ====================================================================
+// --- SETUP ---
+// ====================================================================
+void setup() {
+  lcd.begin(16, 2); 
+  Wire.begin(); 
+
+  // Joystick Button Setup (Mode Toggle)
+  pinMode(ANALOG_BUTTON_PIN, INPUT_PULLUP);
+  attachInterrupt(digitalPinToInterrupt(ANALOG_BUTTON_PIN), joyPressed, FALLING); 
+
+  // Motor Pins Setup
+  pinMode(Motor_L_dir_pin, OUTPUT); 
+  pinMode(Motor_R_dir_pin, OUTPUT); 
+  pinMode(Motor_L_pwm_pin, OUTPUT); 
+  pinMode(Motor_R_pwm_pin, OUTPUT); 
+
+  // Encoder Pins Setup
+  pinMode(2, INPUT_PULLUP);
+  attachInterrupt(digitalPinToInterrupt(2), countEncoder_left, RISING);
+  attachInterrupt(digitalPinToInterrupt(3), countEncoder_right, RISING);
+
+  Serial.begin(115200);
+  Serial2.begin(115200);
+  
+  // Load calibrated distperpuls from EEPROM
+  float storedDist;
+  EEPROM.get(DIST_PER_PULSE_ADDR, storedDist);
+  
+  // Check if a valid value exists (EEPROM defaults to NaN or 0.0 if never written)
+  if (!isnan(storedDist) && storedDist > 0.1) {
+    distperpuls = storedDist;
+    Serial.print("Loaded Calibration from EEPROM: ");
+    Serial.println(distperpuls);
+  } else {
+    Serial.println("No valid calibration in EEPROM. Using default 1.2");
+  }
+
+
+  //LIDAR detection
+  if (myLIDAR.begin() == false) {
+    Serial.println("Device did not acknowledge! Freezing.");
+    while(1);
+  }
+  Serial.println("LIDAR acknowledged!");
+
+  Serial.println("Color View Test!");
+
+  while(!tcs.begin())
+  {
+    Serial.println("No TCS34725 found ... check your connections");
+    delay(1000);
+  }
+
+  Serial.println("Color sensor acknowledged!");
+}
+
+// ====================================================================
+// --- LOOP ---
+// ====================================================================
+void loop() {
+  // --- Print average distace from LIDAR
+  // Serial.print("Avg distance: ");
+  // Serial.print(getAvgDistance(1));
+  // Serial.println("cm");
+  currentDistance = getAvgDistance(2);
+  
+//color sensor code
+
+uint16_t clear, red, green, blue;
+  tcs.getRGBC(&red, &green, &blue, &clear);
+  tcs.lock();  
+
+
+  
+  // Serial.print("C:\t"); Serial.print(clear);
+  // Serial.print("\tR:\t"); Serial.print(red);
+  // Serial.print("\tG:\t"); Serial.print(green);
+  // Serial.print("\tB:\t"); Serial.print(blue);
+  // Serial.println("\t");
+  
+  
+  //variable to store hex code of the overall color
+  String colorSensorFullHexCode = "#";
+  
+  // Figure out some basic hex code for visualization
+  uint32_t sum = clear;
+  float r, g, b;
+  r = red; r /= sum;
+  g = green; g /= sum;
+  b = blue; b /= sum;
+  r *= 256; g *= 256; b *= 256;
+
+  if((int)r < 16) colorSensorFullHexCode += "0";
+  colorSensorFullHexCode += String((int)r, HEX);
+  if((int)g < 16) colorSensorFullHexCode += "0";
+  colorSensorFullHexCode += String((int)g, HEX);
+  if((int)b < 16) colorSensorFullHexCode += "0";
+  colorSensorFullHexCode += String((int)b, HEX);
+
+  // Serial.print("\t");
+  // Serial.print(colorSensorFullHexCode);
+  // Serial.println();
+
+
+
+  // --- Common Sensor Read ---
+  bearingDegrees = readBearing16Bit(); 
+
+  // --- Check for Mode Change ---
+  if (joyPressedFlag) {
+    joyPressedFlag = false;
+    stopMotors(); 
+    Serial.print("Current Mode: ");
+    Serial.println(controlMode);
+    LCDcommandText = ""; // Clear command text on mode switch
+  }
+
+   
+
+  // --- Control Mode Logic ---
+  if (controlMode == "ESP") {
+      // 1. Serial Command Processing
+      if (Serial2.available() > 0 ){
+        String message = Serial2.readStringUntil('\n');
+        Serial.print("Message received, content: ");
+        Serial.println(message);
+        processCommand(message);
+      }
+      if (Serial.available() > 0 ){
+        String message = Serial.readStringUntil('\n');
+        Serial.print("Message received, content: ");
+        Serial.println(message);
+        processCommand(message);
+      }
+
+      
+  
+  }else if (controlMode == "JOY") {
+    
+    // 1. Read Joystick and Control Motors
+    Joystick joystick; 
+    joystick.x = analogRead(ANALOG_X_PIN); 
+    joystick.y = analogRead(ANALOG_Y_PIN); 
+    
+    // Store raw values for LCD display
+    joyX_val = joystick.x;
+    joyY_val = joystick.y; 
+    
+    int* joyPercents = joystickPercentages(joystick.x, joystick.y); 
+
+    runMotors_joy(joyPercents[0], joyPercents[1]);
+
+    // Debug output in Serial monitor
+    Serial.print("JOY Mode - X%: ");
+    Serial.println(joyPercents[0]);
+    Serial.print("JOY Mode - Y%: ");
+    Serial.println(joyPercents[1]);
+  }
+
+
+  //follow logic
+  if(followFlag){
+    GapValue = 30.00;
+    MaxErrGap = 0.50;
+    currentDistance = getAvgDistance(2);
+    updateScreen();
+    Serial.println(currentDistance);
+    if(currentDistance > GapValue+ MaxErrGap){
+      //run motor forward
+      if(currentDistance >GapValue+  3*MaxErrGap){
+      //run motor forward slowly
+      runMotors(50,'f',0,'r');
+      }else{
+        //run fast forward
+      runMotors(30,'f',0,'r');
+      }
+
+    }else if(currentDistance < GapValue - MaxErrGap){
+      //run motor backward
+      if(currentDistance < GapValue-  3*MaxErrGap){
+      //run motor backward slowly
+      runMotors(50,'b',0,'r');
+      }else{
+        //run fast backward
+        runMotors(30,'b',0,'r');
+      }
+    }else{
+      stopMotors();
+    }
+  }
+
+  //Path distance keeping logic
+if(pathFlag) {
+    currentDistance = getAvgDistance(2);
+    float bearingError = bearingDegrees - LockedbearingDegrees;
+
+    // Normalize error for 360-degree wrap-around
+    if (bearingError > 180) bearingError -= 360;
+    if (bearingError < -180) bearingError += 360;
+
+    // 1. Check if heading is significantly off (Use a 2-3 degree buffer)
+    if(abs(bearingError) > 3.0) {
+        char correctDir;
+        getRotationAngle(LockedbearingDegrees, correctDir);
+        // Fix ONLY to the locked degree, do not call handleFollowPath
+        turnToBearing(LockedbearingDegrees, correctDir); 
+    } 
+    // 2. If heading is okay, manage distance
+    else {
+        if(currentDistance > GapValue + MaxErrGap) {
+            runMotors(50, 'f', 0, 'r'); // Drive straight
+        } else if(currentDistance < GapValue - MaxErrGap) {
+            runMotors(30, 'b', 0, 'r'); // Back up
+        } else {
+            // STEP COMPLETE
+            stopMotors();
+            pathFlag = false; 
+            if(currentPathStep + 1 < totalSectionsInPathPlan) {
+                currentPathStep++;
+                startNextPathStep(); // Move to the next plan item
+            }
+        }
+    }
+} // <--- Added closing brace for if(pathFlag) here
+
+  // 2. Start Travel Plan
+
+      if(goFlag){
+        goFlag=false;
+        Serial.println("Go Flag Found");
+        currentDistance = getAvgDistance(2);
+        goMotors(goPlan[0],goPlan[1],goPlan[2],goPlan[3],goPlan[4]);
+        motorRunning = true;
+      }
+      Serial.print("Current:");
+      Serial.println(currentDistance);
+      Serial.print("Target:");
+      Serial.println(tartgetDistance);
+
+      if(goPlan[2] == 'f' && motorRunning && currentDistance <= tartgetDistance){
+        stopMotors(); 
+      }else if(goPlan[2] == 'b' && motorRunning && currentDistance >= tartgetDistance){
+        stopMotors(); 
+      }
+
+      // 3. Motor Movement Control
+      
+  // --- Common LCD Update ---
+  updateScreen();
+
+  // --- Send Lidar Data to ESP ---
+  static unsigned long lastESPUpdate = 0;
+  if (millis() - lastESPUpdate > 500) { 
+    float dist = getAvgDistance(3);
+    
+    // This matches your ESP's "if (data.startsWith("LIDAR:"))"
+    // Inside Arduino Loop
+  Serial2.println("LIDAR:" + String(dist));       // Use println for clear separation
+  Serial2.println("Compass:" + String(bearingDegrees));
+  Serial2.println("Color:" + String(colorSensorFullHexCode));
+    
+    lastESPUpdate = millis();
+  }
+  delay(1);
+  
+}
+
